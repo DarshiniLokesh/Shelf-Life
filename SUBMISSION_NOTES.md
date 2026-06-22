@@ -48,7 +48,30 @@ The UI modal dynamically hides/shows fields depending on the selected quantity t
 
 ## 5. Integration Tests
 
-We included a comprehensive Jest test suite at `backend/tests/api.test.ts` running 13 assertions:
+We included a comprehensive Jest test suite at `backend/tests/api.test.ts` running 14 assertions:
 * **Identity Guardrail**: Asserts display name lengths, character formats, registration PIN creation, and login credential checks.
 * **API Validation**: Verifies that empty name submissions, missing categories, negative counts, and invalid weight units (anything other than `g`/`kg`) are strictly rejected.
 * **CRUD & Consumption**: Asserts adding items, editing quantities, marking items as used, and deleting mistaken entries.
+
+---
+
+## 6. Resolutions of Architectural Tensions
+
+The project specifications contain four distinct points of tension. Here is how we resolved them:
+
+### 1. Casual Login vs. Impersonation Prevention
+* **Tension**: Users want a frictionless login (just a name, no passwords), but they also don't want housemates logging in under someone else's name to make edits.
+* **Resolution**: We implemented a **Passwordless PIN-based Guardrail**. Upon first registering a name, the server generates a unique 6-digit PIN and stores it in the client session storage. If another device or browser tries to log in as that user, they must provide the PIN. A "Key" icon allows users to view and copy their PIN to secondary devices.
+
+### 2. Diverse Quantities (Numeric, Weight, Binary)
+* **Tension**: Quantities differ depending on the item: counted (4 onions), weighed (500g rice), or binary presence (salt is either there or not). We must support all three without forcing users to type fake numbers.
+* **Resolution**: The `Items` schema uses an explicit `quantityType` column (`count`, `weight`, or `boolean`). If `boolean` ("Presence Only") is selected, the input fields for quantity values and units are disabled and stored as `null` in the database, preventing fake numbers.
+
+### 3. "No Full Edit History" vs. Knowing Who Used the Last Unit
+* **Tension**: Housemates want to know who used the last unit of something (to assign restocking duties) but explicitly rejected building a heavy, bloated historical edit tracking system.
+* **Resolution**: The `Items` schema includes three direct tracking fields: `addedById`, `lastTouchedById`, and `usedUpById`. When an item's status is toggled to `used`, the `usedUpById` field is populated with the ID of the active user. This stores the necessary restocking data directly on the item, avoiding complex version tracking.
+
+### 4. Real-time Consistency Mechanism
+* **Tension**: Multiple users must see changes immediately without heavy server connection overhead.
+* **Resolution**: We chose **Server-Sent Events (SSE)** with a **5-second Polling Fallback**. SSE uses standard HTTP streaming to broadcast updates to all active clients instantly upon item CRUD actions, avoiding the complex state management of WebSockets. In environments where SSE is blocked (e.g. firewall/old browser), the client falls back to 5-second polling, ensuring consistency within the 1-minute constraint.
+
