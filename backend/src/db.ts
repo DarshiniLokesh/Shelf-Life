@@ -429,10 +429,76 @@ class InMemoryDatabase implements IDatabase {
 }
 
 // ----------------------------------------------------
-// Export Database Instance Selector
+// Export Resilient Database Wrapper
 // ----------------------------------------------------
 const useRealMssql = process.env.NODE_ENV === 'test' 
   ? (process.env.USE_TEST_MSSQL === 'true')
   : (process.env.MSSQL_PASSWORD !== undefined || process.env.MSSQL_HOST !== undefined);
 
-export const db: IDatabase = useRealMssql ? new MssqlDatabase() : new InMemoryDatabase();
+class ResilientDatabase implements IDatabase {
+  private activeDb: IDatabase;
+
+  constructor() {
+    this.activeDb = useRealMssql ? new MssqlDatabase() : new InMemoryDatabase();
+  }
+
+  async initialize(): Promise<void> {
+    try {
+      await this.activeDb.initialize();
+    } catch (err) {
+      if (this.activeDb instanceof MssqlDatabase) {
+        console.warn('[DB] Failed to connect to MS SQL database. Falling back to In-Memory database.', err);
+        this.activeDb = new InMemoryDatabase();
+        await this.activeDb.initialize();
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  async getUserByName(name: string): Promise<User | null> {
+    return this.activeDb.getUserByName(name);
+  }
+
+  async getUserById(id: string): Promise<User | null> {
+    return this.activeDb.getUserById(id);
+  }
+
+  async createUser(name: string, token: string): Promise<User> {
+    return this.activeDb.createUser(name, token);
+  }
+
+  async getItems(): Promise<Item[]> {
+    return this.activeDb.getItems();
+  }
+
+  async getItemById(id: string): Promise<Item | null> {
+    return this.activeDb.getItemById(id);
+  }
+
+  async createItem(item: Omit<Item, 'id' | 'createdAt' | 'updatedAt'>): Promise<Item> {
+    return this.activeDb.createItem(item);
+  }
+
+  async updateItem(id: string, item: Partial<Item>): Promise<Item> {
+    return this.activeDb.updateItem(id, item);
+  }
+
+  async deleteItem(id: string): Promise<Item> {
+    return this.activeDb.deleteItem(id);
+  }
+
+  async createAuditLog(action: string, userId: string, itemId: string | null, details: string): Promise<void> {
+    return this.activeDb.createAuditLog(action, userId, itemId, details);
+  }
+
+  async getAuditLogs(): Promise<AuditLog[]> {
+    return this.activeDb.getAuditLogs();
+  }
+
+  async clearData(): Promise<void> {
+    return this.activeDb.clearData();
+  }
+}
+
+export const db: IDatabase = new ResilientDatabase();
